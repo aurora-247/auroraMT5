@@ -1,30 +1,28 @@
-# include the library
 import MT5Manager
-# include library for handling dates
-import datetime
-# create manager interface
+
+# Create manager and admin objects
 manager = MT5Manager.ManagerAPI()
-# connect the server
-if manager.Connect("demo.forexriver.net:437", 1017, "0nR*RgRb", 0, 3000000):
-    # request deal history up to the current moment
-    date_to = datetime.datetime.now()
-    # # request deal history for last 100 days
-    date_from = date_to - datetime.timedelta(days=100)
-    # # request deal history
-    # deals = manager.DealRequestPage(10004279, from = date_from, to = date_to, 0,10)
-    deals = manager.DealRequestByGroup("demo\\RP\\PRO, demo\\RP\\Prime", date_from, date_to)
-    if deals == False:
-        # request failed with error
-        print(f"Failed to request deals: {MT5Manager.LastError()}")
-    else:
-        # display total number of deals
-        print(f"Get {len(deals)} deals")
-        # display all balance deals
-        # for deal in deals:
-            # if deal.Action == MT5Manager.MTDeal.EnDealAction.DEAL_BALANCE:
-           # print(deal.Print())
-    # disconnect from the server
-    manager.Disconnect()
+admin = MT5Manager.AdminAPI()
+
+if admin.Connect("demo.forexriver.net:437", 1017, "0nR*RgRb", 0, 3000000):
+    try:
+        total_groups = admin.GroupTotal()  # Hypothetical function that returns the count
+        print(f"total groups: {total_groups}")
+        if total_groups > 0:
+            for i in range(total_groups):
+                # Retrieve the group configuration by index.
+                # The actual method name might be GroupNext, GroupsRequest, etc.
+                group_obj = admin.GroupNext(i)
+                if group_obj:
+                    # Print the group name from the property (getter)
+                    print("Group {}: {}".format(i, group_obj.Group))
+                else:
+                    print("No group object returned for index", i)
+        else:
+            print("No groups found")
+    except AttributeError:
+        print("The AdminAPI does not expose a groups enumeration method with this name.")
+    finally:
+        manager.Disconnect()
 else:
-    # failed to connect to the server
-    print(f"Failed to connect to server: {MT5Manager.LastError()}")
+    print("Failed to connect:", MT5Manager.LastError())

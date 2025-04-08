@@ -72,19 +72,44 @@ interface ApiResponse {
   deals: Deal[];
 }
 
+// Assuming the accounts API returns a list of objects with an identifier (and optionally a name)
+interface Account {
+  identifier: string;
+  name?: string;
+}
+
 const PAGE_SIZE = 10;
 
+// Helper function to format a Date object in the format "YYYY-MM-DDTHH:MM" for datetime-local input
+const formatDateTimeLocal = (date: Date): string => {
+  const pad = (num: number) => (num < 10 ? `0${num}` : num);
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 const DealHistory: React.FC = () => {
-  // State for grouped deals data
+  // State for grouped deals data and pagination
   const [groupedData, setGroupedData] = useState<GroupData[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Filter parameters state
-  const [days, setDays] = useState<number>(1);
   const [selectedGroups, setSelectedGroups] = useState<string[]>(["real\\Mahfaza"]);
 
-  // Static group options
+  // Remove the 'days' field; instead, use date_from and date_to.
+  // Set defaults to: date_from = one day ago, date_to = now.
+  const [dateFrom, setDateFrom] = useState<string>(formatDateTimeLocal(new Date(Date.now() - 86400 * 1000)));
+  const [dateTo, setDateTo] = useState<string>(formatDateTimeLocal(new Date()));
+
+  // State for identifier selection from active connections
+  const [identifiers, setIdentifiers] = useState<string[]>([]);
+  const [selectedIdentifier, setSelectedIdentifier] = useState<string>("");
+
+  // Static group options (unchanged)
   const groupOptions = [
     "real\\Mahfaza",
     "reall\\raw",
@@ -121,11 +146,32 @@ const DealHistory: React.FC = () => {
     return Object.values(groups);
   };
 
-  // Build API URL and fetch data
+  // Fetch active connections for identifiers from the accounts endpoint
+const fetchActiveConnections = () => {
+  fetch("http://127.0.0.1:8000/api/v1/mt5-manager/accounts/")
+    .then((res) => res.json())
+    .then((data: { active_managers: Account[] }) => {
+      const ids = data.active_managers.map((account) => account.identifier);
+      setIdentifiers(ids);
+      if (ids.length > 0 && !selectedIdentifier) {
+        setSelectedIdentifier(ids[0]);
+      }
+    })
+    .catch((err) => {
+      console.error("Error fetching active accounts:", err);
+    });
+};
+
+  // Build API URL and fetch deals data using the new date parameters and selected identifier
   const fetchData = () => {
+    if (!selectedIdentifier) {
+      console.error("No identifier selected");
+      return;
+    }
     // Join selected groups with comma separator; each will be URL-encoded
     const groupsParam = selectedGroups.map(encodeURIComponent).join(",");
-    const url = `http://127.0.0.1:8000/api/v1/mt5-manager/deals/2/by-group?groups=${groupsParam}&days=${days}`;
+    // Construct the endpoint URL using the selected identifier and new query parameters
+    const url = `http://127.0.0.1:8000/api/v1/mt5-manager/deals/${selectedIdentifier}/by-group?groups=${groupsParam}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`;
 
     fetch(url)
       .then((res) => res.json())
@@ -144,10 +190,23 @@ const DealHistory: React.FC = () => {
       });
   };
 
-  // Fetch default data when component mounts
-  useEffect(() => {
+  // When the component mounts, fetch active connections and default deals data
+  // Fetch active connections when the component mounts.
+useEffect(() => {
+  fetchActiveConnections();
+}, []);
+
+// Fetch deal history whenever the selectedIdentifier changes and is not empty.
+useEffect(() => {
+  if (selectedIdentifier) {
     fetchData();
-  }, []);
+  }
+}, [selectedIdentifier]);
+
+  // Handler for when the identifier dropdown changes
+  const handleIdentifierChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedIdentifier(e.target.value);
+  };
 
   // Handler for when the group dropdown changes (supports multiple selections)
   const handleGroupsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -163,35 +222,35 @@ const DealHistory: React.FC = () => {
 
   // Prepare chart data using grouped totals
   const getChartData = () => {
-    const labels = groupedData.map(group => group.symbol);
+    const labels = groupedData.map((group) => group.symbol);
     return {
       labels,
       datasets: [
         {
           label: "Total Volume",
-          data: groupedData.map(group => group.totals.total_volume),
+          data: groupedData.map((group) => group.totals.total_volume),
           backgroundColor: "rgba(75, 192, 192, 0.6)"
         },
         {
           label: "Total Profit",
-          data: groupedData.map(group => group.totals.total_profit),
+          data: groupedData.map((group) => group.totals.total_profit),
           backgroundColor: "rgba(54, 162, 235, 0.6)"
         },
         {
           label: "Total Commission",
-          data: groupedData.map(group => group.totals.total_commission),
+          data: groupedData.map((group) => group.totals.total_commission),
           backgroundColor: "rgba(255, 206, 86, 0.6)"
         },
         {
           label: "Total Storage",
-          data: groupedData.map(group => group.totals.total_storage),
+          data: groupedData.map((group) => group.totals.total_storage),
           backgroundColor: "rgba(255, 99, 132, 0.6)"
         },
       ],
     };
   };
 
-  // Render the summary table showing totals per symbol using Bootstrap table classes
+  // Render the summary table showing totals per symbol
   const renderSummaryTable = () => {
     if (!groupedData || groupedData.length === 0) {
       return <div>No summary data available.</div>;
@@ -226,7 +285,7 @@ const DealHistory: React.FC = () => {
     );
   };
 
-  // Render the table of deals for the selected symbol with pagination using Bootstrap table
+  // Render the table of deals for the selected symbol with pagination
   const renderDealTable = () => {
     if (!groupedData || groupedData.length === 0) {
       return <p>No deal history data available.</p>;
@@ -243,6 +302,7 @@ const DealHistory: React.FC = () => {
         <Table bordered hover className="mb-4">
           <thead>
             <tr>
+              <td>login</td>
               <th>Ticket</th>
               <th>Volume</th>
               <th>Profit</th>
@@ -254,6 +314,7 @@ const DealHistory: React.FC = () => {
           <tbody>
             {paginatedDeals.map((deal, index) => (
               <tr key={index}>
+                <td>{deal.login}</td>
                 <td>{deal.ticket}</td>
                 <td>{deal.volume}</td>
                 <td>{deal.profit}</td>
@@ -279,7 +340,25 @@ const DealHistory: React.FC = () => {
       {/* Filter Form */}
       <Form onSubmit={(e) => { e.preventDefault(); fetchData(); }} className="mb-4">
         <Row className="align-items-end">
-          <Col md={6}>
+          {/* Identifier Dropdown */}
+          <Col md={3}>
+            <Form.Group controlId="formIdentifier" className="mb-3">
+              <Form.Label>Identifier</Form.Label>
+              <Form.Control as="select" value={selectedIdentifier} onChange={handleIdentifierChange}>
+                {identifiers.length > 0 ? (
+                  identifiers.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No active connections</option>
+                )}
+              </Form.Control>
+            </Form.Group>
+          </Col>
+          {/* Groups Selection */}
+          <Col md={3}>
             <Form.Group controlId="formGroups" className="mb-3">
               <Form.Label>Groups</Form.Label>
               <Form.Control as="select" multiple value={selectedGroups} onChange={handleGroupsChange}>
@@ -291,18 +370,30 @@ const DealHistory: React.FC = () => {
               </Form.Control>
             </Form.Group>
           </Col>
+          {/* Date From Picker */}
           <Col md={3}>
-            <Form.Group controlId="formDays" className="mb-3">
-              <Form.Label>Days</Form.Label>
+            <Form.Group controlId="formDateFrom" className="mb-3">
+              <Form.Label>Date From</Form.Label>
               <Form.Control
-                type="number"
-                value={days}
-                onChange={(e) => setDays(Number(e.target.value))}
-                min={1}
+                type="datetime-local"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
               />
             </Form.Group>
           </Col>
+          {/* Date To Picker */}
           <Col md={3}>
+            <Form.Group controlId="formDateTo" className="mb-3">
+              <Form.Label>Date To</Form.Label>
+              <Form.Control
+                type="datetime-local"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </Form.Group>
+          </Col>
+          {/* Apply Filters Button */}
+          <Col md={12}>
             <Button variant="primary" type="submit">
               Apply Filters
             </Button>
