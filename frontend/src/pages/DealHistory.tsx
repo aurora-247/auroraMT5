@@ -1,7 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { Form, Button, Table, Container, Row, Col, Pagination } from "react-bootstrap";
+import {
+  Form,
+  Button,
+  Table,
+  Container,
+  Row,
+  Col,
+  Pagination,
+  Spinner,
+  Alert
+} from "react-bootstrap";
 import { Bar } from "react-chartjs-2";
-import 'chart.js/auto';
+import "chart.js/auto";
+import Select from "react-select";
 
 // Define interfaces based on expected API response
 interface Deal {
@@ -72,15 +83,33 @@ interface ApiResponse {
   deals: Deal[];
 }
 
-// Assuming the accounts API returns a list of objects with an identifier (and optionally a name)
 interface Account {
   identifier: string;
   name?: string;
 }
 
-const PAGE_SIZE = 10;
+interface GroupConfiguration {
+  group_name: string;
+  server_id: number;
+  permissions: number;
+  auth_mode: number;
+  company: string;
+  commissions: any[];
+  symbols: {
+    path: string;
+    trade_mode: number;
+  }[];
+}
 
-// Helper function to format a Date object in the format "YYYY-MM-DDTHH:MM" for datetime-local input
+// Option type for react-select
+interface Option {
+  value: string;
+  label: string;
+}
+
+const PAGE_SIZE = 100;
+
+// Helper function to format a Date object in "YYYY-MM-DDTHH:MM" format for datetime-local
 const formatDateTimeLocal = (date: Date): string => {
   const pad = (num: number) => (num < 10 ? `0${num}` : num);
   const year = date.getFullYear();
@@ -92,35 +121,27 @@ const formatDateTimeLocal = (date: Date): string => {
 };
 
 const DealHistory: React.FC = () => {
-  // State for grouped deals data and pagination
+  // States for deal history and chart
   const [groupedData, setGroupedData] = useState<GroupData[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Filter parameters state
-  const [selectedGroups, setSelectedGroups] = useState<string[]>(["real\\Mahfaza"]);
-
-  // Remove the 'days' field; instead, use date_from and date_to.
-  // Set defaults to: date_from = one day ago, date_to = now.
-  const [dateFrom, setDateFrom] = useState<string>(formatDateTimeLocal(new Date(Date.now() - 86400 * 1000)));
+  // Filter parameters
+  const [dateFrom, setDateFrom] = useState<string>(
+    formatDateTimeLocal(new Date(Date.now() - 86400 * 1000))
+  );
   const [dateTo, setDateTo] = useState<string>(formatDateTimeLocal(new Date()));
 
-  // State for identifier selection from active connections
+  // Active connection state
   const [identifiers, setIdentifiers] = useState<string[]>([]);
   const [selectedIdentifier, setSelectedIdentifier] = useState<string>("");
 
-  // Static group options (unchanged)
-  const groupOptions = [
-    "real\\Mahfaza",
-    "reall\\raw",
-    "real\\Pro",
-    "real\\VIP",
-    "real\\NS-Mahfaza",
-    "real\\NS-Pro",
-    "real\\NS-VIP"
-  ];
+  // Group options & selection using react-select
+  const [groupOptions, setGroupOptions] = useState<Option[]>([]);
+  const [selectedGroupOptions, setSelectedGroupOptions] = useState<Option[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState<boolean>(false);
 
-  // Group the deals by symbol and compute totals for each group
+  // Group deals by symbol (unchanged)
   const groupDealsBySymbol = (deals: Deal[]): GroupData[] => {
     const groups: { [key: string]: GroupData } = {};
     deals.forEach((deal) => {
@@ -134,7 +155,7 @@ const DealHistory: React.FC = () => {
             total_profit: 0,
             total_commission: 0,
             total_storage: 0,
-          },
+          }
         };
       }
       groups[symbol].deals.push(deal);
@@ -146,32 +167,60 @@ const DealHistory: React.FC = () => {
     return Object.values(groups);
   };
 
-  // Fetch active connections for identifiers from the accounts endpoint
-const fetchActiveConnections = () => {
-  fetch("http://127.0.0.1:8000/api/v1/mt5-manager/accounts/")
-    .then((res) => res.json())
-    .then((data: { active_managers: Account[] }) => {
-      const ids = data.active_managers.map((account) => account.identifier);
-      setIdentifiers(ids);
-      if (ids.length > 0 && !selectedIdentifier) {
-        setSelectedIdentifier(ids[0]);
-      }
-    })
-    .catch((err) => {
-      console.error("Error fetching active accounts:", err);
-    });
-};
+  // Fetch active connections from accounts endpoint
+  const fetchActiveConnections = () => {
+    fetch("http://127.0.0.1:8000/api/v1/mt5-manager/accounts/")
+      .then((res) => res.json())
+      .then((data: { active_managers: Account[] }) => {
+        const ids = data.active_managers.map((account) => account.identifier);
+        setIdentifiers(ids);
+        if (ids.length > 0 && !selectedIdentifier) {
+          setSelectedIdentifier(ids[0]);
+        }
+      })
+      .catch((err) => {
+        console.error("Error fetching active accounts:", err);
+      });
+  };
 
-  // Build API URL and fetch deals data using the new date parameters and selected identifier
+  // Fetch group configurations to populate group options
+  const fetchGroupConfigurations = async (identifier: string) => {
+    try {
+      setLoadingGroups(true);
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/v1/mt5-manager/groups/${identifier}/group-configurations`
+      );
+      const data: GroupConfiguration[] = await response.json();
+      // Map group configurations to an array of options
+      const options = data.map((config) => ({
+        value: config.group_name,
+        label: config.group_name
+      }));
+      setGroupOptions(options);
+      // Set default selected groups if none selected
+      if (selectedGroupOptions.length === 0 && options.length > 0) {
+        setSelectedGroupOptions([options[0]]);
+      }
+    } catch (err) {
+      console.error("Error fetching group configurations:", err);
+      setGroupOptions([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  // Fetch deal history using selected parameters
   const fetchData = () => {
     if (!selectedIdentifier) {
       console.error("No identifier selected");
       return;
     }
-    // Join selected groups with comma separator; each will be URL-encoded
-    const groupsParam = selectedGroups.map(encodeURIComponent).join(",");
-    // Construct the endpoint URL using the selected identifier and new query parameters
-    const url = `http://127.0.0.1:8000/api/v1/mt5-manager/deals/${selectedIdentifier}/by-group?groups=${groupsParam}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`;
+    const groupsParam = selectedGroupOptions
+      .map((option) => encodeURIComponent(option.value))
+      .join(",");
+    const url = `http://127.0.0.1:8000/api/v1/mt5-manager/deals/${selectedIdentifier}/by-group?groups=${groupsParam}&date_from=${encodeURIComponent(
+      dateFrom
+    )}&date_to=${encodeURIComponent(dateTo)}`;
 
     fetch(url)
       .then((res) => res.json())
@@ -190,37 +239,32 @@ const fetchActiveConnections = () => {
       });
   };
 
-  // When the component mounts, fetch active connections and default deals data
-  // Fetch active connections when the component mounts.
-useEffect(() => {
-  fetchActiveConnections();
-}, []);
+  useEffect(() => {
+    fetchActiveConnections();
+  }, []);
 
-// Fetch deal history whenever the selectedIdentifier changes and is not empty.
-useEffect(() => {
-  if (selectedIdentifier) {
-    fetchData();
-  }
-}, [selectedIdentifier]);
+  useEffect(() => {
+    if (selectedIdentifier) {
+      fetchGroupConfigurations(selectedIdentifier);
+      fetchData();
+    }
+  }, [selectedIdentifier]);
 
-  // Handler for when the identifier dropdown changes
+  // Handler for when identifier changes
   const handleIdentifierChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedIdentifier(e.target.value);
   };
 
-  // Handler for when the group dropdown changes (supports multiple selections)
-  const handleGroupsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const options = Array.from(e.target.selectedOptions, (option) => option.value);
-    setSelectedGroups(options);
+  // When the react-select groups change, update state
+  const handleGroupSelectChange = (options: Option[] | null) => {
+    setSelectedGroupOptions(options || []);
   };
 
-  // Handler when user clicks a summary row to change the selected symbol
   const handleSymbolClick = (symbol: string) => {
     setSelectedSymbol(symbol);
     setCurrentPage(1);
   };
 
-  // Prepare chart data using grouped totals
   const getChartData = () => {
     const labels = groupedData.map((group) => group.symbol);
     return {
@@ -245,12 +289,11 @@ useEffect(() => {
           label: "Total Storage",
           data: groupedData.map((group) => group.totals.total_storage),
           backgroundColor: "rgba(255, 99, 132, 0.6)"
-        },
-      ],
+        }
+      ]
     };
   };
 
-  // Render the summary table showing totals per symbol
   const renderSummaryTable = () => {
     if (!groupedData || groupedData.length === 0) {
       return <div>No summary data available.</div>;
@@ -271,7 +314,11 @@ useEffect(() => {
             <tr
               key={group.symbol}
               onClick={() => handleSymbolClick(group.symbol)}
-              style={{ cursor: "pointer", backgroundColor: selectedSymbol === group.symbol ? "#f0f0f0" : "white" }}
+              style={{
+                cursor: "pointer",
+                backgroundColor:
+                  selectedSymbol === group.symbol ? "#f0f0f0" : "white"
+              }}
             >
               <td>{group.symbol}</td>
               <td>{group.totals.total_volume}</td>
@@ -285,24 +332,21 @@ useEffect(() => {
     );
   };
 
-  // Render the table of deals for the selected symbol with pagination
   const renderDealTable = () => {
     if (!groupedData || groupedData.length === 0) {
       return <p>No deal history data available.</p>;
     }
     const group = groupedData.find((g) => g.symbol === selectedSymbol);
     if (!group) return <p>No data for selected symbol.</p>;
-
     const startIndex = (currentPage - 1) * PAGE_SIZE;
     const paginatedDeals = group.deals.slice(startIndex, startIndex + PAGE_SIZE);
     const totalPages = Math.ceil(group.deals.length / PAGE_SIZE);
-
     return (
       <>
         <Table bordered hover className="mb-4">
           <thead>
             <tr>
-              <td>login</td>
+              <td>Login</td>
               <th>Ticket</th>
               <th>Volume</th>
               <th>Profit</th>
@@ -326,9 +370,17 @@ useEffect(() => {
           </tbody>
         </Table>
         <Pagination className="justify-content-center">
-          <Pagination.Prev onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} />
+          <Pagination.Prev
+            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+          />
           <Pagination.Item active>{`Page ${currentPage} of ${totalPages}`}</Pagination.Item>
-          <Pagination.Next onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} />
+          <Pagination.Next
+            onClick={() =>
+              setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+            }
+            disabled={currentPage === totalPages}
+          />
         </Pagination>
       </>
     );
@@ -337,8 +389,13 @@ useEffect(() => {
   return (
     <Container className="py-4">
       <h1 className="mb-4">Deal History</h1>
-      {/* Filter Form */}
-      <Form onSubmit={(e) => { e.preventDefault(); fetchData(); }} className="mb-4">
+      <Form
+        onSubmit={(e) => {
+          e.preventDefault();
+          fetchData();
+        }}
+        className="mb-4"
+      >
         <Row className="align-items-end">
           {/* Identifier Dropdown */}
           <Col md={3}>
@@ -357,17 +414,24 @@ useEffect(() => {
               </Form.Control>
             </Form.Group>
           </Col>
-          {/* Groups Selection */}
+          {/* Groups Multi-select using react-select with internal search */}
           <Col md={3}>
             <Form.Group controlId="formGroups" className="mb-3">
               <Form.Label>Groups</Form.Label>
-              <Form.Control as="select" multiple value={selectedGroups} onChange={handleGroupsChange}>
-                {groupOptions.map((group) => (
-                  <option key={group} value={group}>
-                    {group}
-                  </option>
-                ))}
-              </Form.Control>
+              {loadingGroups ? (
+                <div className="d-flex align-items-center">
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  <span>Loading groups...</span>
+                </div>
+              ) : (
+                <Select
+                  options={groupOptions}
+                  isMulti
+                  placeholder="Select groups..."
+                  value={selectedGroupOptions}
+                  onChange={handleGroupSelectChange}
+                />
+              )}
             </Form.Group>
           </Col>
           {/* Date From Picker */}
@@ -409,18 +473,14 @@ useEffect(() => {
               options={{
                 responsive: true,
                 plugins: {
-                  legend: {
-                    position: "top",
-                  },
-                },
+                  legend: { position: "top" }
+                }
               }}
             />
           </Col>
         </Row>
       )}
-      {/* Summary Table */}
       {renderSummaryTable()}
-      {/* Deal Table for Selected Symbol */}
       <h2 className="mb-3">Deals for Symbol: {selectedSymbol}</h2>
       {renderDealTable()}
     </Container>
