@@ -34,9 +34,19 @@ const Header = () => {
             <Nav.Link as={NavLink} to="/group-configurations/1" className="px-3">
               Group Config
             </Nav.Link>
-            <Nav.Link as={NavLink} to="/mt5-manager" className="px-3">
+            <Nav.Link as={NavLink} to="/terminal-deal-history" className="px-3">
+              Terminal Deals history
+            </Nav.Link>
+            <Nav.Link as={NavLink} to="/PL" className="px-3">
+              P&L
+            </Nav.Link>
+            <Nav.Link as={NavLink} to="/Mapping" className="px-3">
+              Mapping
+            </Nav.Link>
+            <Nav.Link as={NavLink} to="/admin" className="px-3">
               Admin
             </Nav.Link>
+
 
 
             {/*

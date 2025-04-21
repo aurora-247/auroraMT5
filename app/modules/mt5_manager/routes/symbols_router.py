@@ -1,23 +1,63 @@
-from fastapi import APIRouter
+# app/modules/mt5_manager/symbols_router.py
+
+import MT5Manager
+import logging
+from fastapi import APIRouter, HTTPException
+from typing import Any, Dict, List
+
 from app.modules.mt5_manager.manager import mt5_managers
 
-router = APIRouter(prefix="/symbols")
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/symbols", tags=["symbols"])
 
-# ✅ Fetch symbols for a group
-@router.get("/{identifier}/{group_name}/symbols")
-def get_group_symbols(identifier: str, group_name: str):
-    """Retrieve all symbols assigned to a specific group for an MT5 instance."""
+
+@router.get("/{identifier}", summary="List all symbol configurations")
+def list_symbols(identifier: str):
+    """
+    Retrieve and return all symbol configurations from an MT5 Manager instance.
+    """
+    # 1) Validate
     if identifier not in mt5_managers:
-        return {"error": "Manager instance not found."}
+        logger.warning(f"Symbols request for unknown identifier: {identifier}")
+        raise HTTPException(status_code=404, detail="Manager instance not found")
 
-    return mt5_managers[identifier].get_group_symbols(group_name)
+    svc = mt5_managers[identifier]
 
+    # 2) Ensure connected
+    if not svc.connected:
+        logger.debug(f"Connecting MT5ManagerService for identifier {identifier}")
+        if not svc.connect():
+            err = MT5Manager.LastError()
+            logger.error(f"Failed to connect for {identifier}: {err}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to connect MT5 Manager: {err}"
+            )
 
-# ✅ Fetch symbol configuration
-@router.get("/{identifier}/{symbol_name}")
-def get_symbol_configuration(identifier: str, symbol_name: str):
-    """Retrieve configuration details of a specific symbol."""
-    if identifier not in mt5_managers:
-        return {"error": "Manager instance not found."}
+    # 3) Fetch total symbol count
+    total = svc.manager.SymbolTotal()
+    if total is False or total <= 0:
+        return {"count": 0, "symbols": []}
 
-    return mt5_managers[identifier].get_symbol_configuration(symbol_name)
+    symbols: List[Dict[str, Any]] = []
+
+    # 4) Enumerate every symbol by index
+    for idx in range(total):
+        sym = svc.manager.SymbolNext(idx)
+        if not sym:
+            logger.warning(f"SymbolNext returned None at index {idx}")
+            continue
+
+        # 5) Extract all non-private, non-callable attributes
+        info: Dict[str, Any] = {}
+        for attr in dir(sym):
+            if attr.startswith("_"):
+                continue
+            value = getattr(sym, attr)
+            if callable(value):
+                continue
+            info[attr] = value
+
+        symbols.append(info)
+
+    return {"count": len(symbols), "symbols": symbols}
