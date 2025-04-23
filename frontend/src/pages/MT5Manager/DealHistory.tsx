@@ -501,7 +501,7 @@ const DealHistory: React.FC = () => {
                       backgroundColor:selectedSymbol===g.symbol?"#f0f0f0":undefined
                     }}>
                   <td>{g.symbol}</td>
-                  <td>{g.totals.volume.toFixed(2)}</td>
+                  <td>{g.totals.volume.toFixed(2)/10000}</td>
                   <td style={{color:g.totals.profit>0?"green":g.totals.profit<0?"red":"blue"}}>
                     {g.totals.profit.toFixed(2)}
                   </td>
@@ -513,7 +513,7 @@ const DealHistory: React.FC = () => {
             <tfoot>
               <tr className="table-secondary">
                 <th>Totals</th>
-                <th>{groupedData.reduce((s,g)=>s+g.totals.volume,0).toFixed(2)}</th>
+                <th>{groupedData.reduce((s,g)=>s+g.totals.volume,0).toFixed(2)/10000}</th>
                 <th>{groupedData.reduce((s,g)=>s+g.totals.profit,0).toFixed(2)}</th>
                 <th>{groupedData.reduce((s,g)=>s+g.totals.commission,0).toFixed(2)}</th>
                 <th>{groupedData.reduce((s,g)=>s+g.totals.swap,0).toFixed(2)}</th>
