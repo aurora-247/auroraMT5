@@ -1,8 +1,9 @@
-import React from "react";
+// src/components/ErrorBoundary.tsx
+import React, { ReactNode, ErrorInfo } from "react";
 import { Container, Alert } from "react-bootstrap";
 
 interface ErrorBoundaryProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -23,8 +24,17 @@ export class ErrorBoundary extends React.Component<
     return { hasError: true, message: error.message };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("ErrorBoundary caught an error:", error, info);
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    if (
+      this.state.hasError &&
+      prevProps.children !== this.props.children
+    ) {
+      this.setState({ hasError: false, message: "" });
+    }
   }
 
   render() {
@@ -38,6 +48,7 @@ export class ErrorBoundary extends React.Component<
         </Container>
       );
     }
-    return this.props.children as React.ReactElement;
+
+    return this.props.children;
   }
 }

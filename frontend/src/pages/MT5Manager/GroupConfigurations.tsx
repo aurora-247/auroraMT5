@@ -1,7 +1,17 @@
-// GroupConfigurations.tsx
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Container, Table, Alert, Spinner } from 'react-bootstrap';
+import {
+  Container,
+  Accordion,
+  Card,
+  Table,
+  Alert,
+  Spinner,
+  Form,
+  Row,
+  Col,
+} from 'react-bootstrap';
+import { FaSearch } from 'react-icons/fa';
 
 interface CommissionTier {
   range_from: number;
@@ -15,8 +25,7 @@ interface Commission {
 }
 
 interface SymbolData {
-  path: string | null;
-  trade_mode: number | null;
+  [key: string]: any; // flexible to display all symbol properties
 }
 
 interface GroupConfiguration {
@@ -29,23 +38,21 @@ interface GroupConfiguration {
   symbols: SymbolData[];
 }
 
-const GroupConfigurations: React.FC = () => {
-  // Retrieve the manager identifier from the URL
+const EnhancedGroupConfigurations: React.FC = () => {
   const { identifier } = useParams<{ identifier: string }>();
   const [groups, setGroups] = useState<GroupConfiguration[]>([]);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+  const [filterTerm, setFilterTerm] = useState<string>('');
 
   useEffect(() => {
     const fetchGroups = async () => {
       try {
-        const response = await fetch(
+        const res = await fetch(
           `http://127.0.0.1:8000/api/v1/mt5-manager/groups/${identifier}/group-configurations`
         );
-        if (!response.ok) {
-          throw new Error(`Error fetching groups: ${response.statusText}`);
-        }
-        const data = await response.json();
+        if (!res.ok) throw new Error(`Error: ${res.statusText}`);
+        const data: GroupConfiguration[] = await res.json();
         setGroups(data);
       } catch (err: any) {
         setError(err.message);
@@ -56,16 +63,21 @@ const GroupConfigurations: React.FC = () => {
     fetchGroups();
   }, [identifier]);
 
+  const filtered = groups.filter(g =>
+    g.group_name.toLowerCase().includes(filterTerm.toLowerCase())
+  );
+
   if (loading) {
     return (
-      <Container className="py-4">
-        <Spinner animation="border" /> Loading group configurations...
+      <Container className="d-flex justify-content-center align-items-center vh-100">
+        <Spinner animation="grow" />
       </Container>
     );
   }
+
   if (error) {
     return (
-      <Container className="py-4">
+      <Container className="mt-5">
         <Alert variant="danger">{error}</Alert>
       </Container>
     );
@@ -73,79 +85,111 @@ const GroupConfigurations: React.FC = () => {
 
   return (
     <Container className="py-4">
-      <h1 className="mb-4">Group Configurations for Manager: {identifier}</h1>
-      {groups.length === 0 ? (
-        <Alert variant="info">No group configurations found.</Alert>
+      <h2 className="mb-4">
+        Group Configurations for Manager: <span className="text-primary">{identifier}</span>
+      </h2>
+
+      <Form className="mb-3">
+        <Form.Group controlId="filter">
+          <Form.Label>
+            <FaSearch /> Search Groups
+          </Form.Label>
+          <Form.Control
+            type="text"
+            placeholder="Enter group name..."
+            value={filterTerm}
+            onChange={e => setFilterTerm(e.target.value)}
+          />
+        </Form.Group>
+      </Form>
+
+      {filtered.length === 0 ? (
+        <Alert variant="info">No matching group configurations.</Alert>
       ) : (
-        groups.map((group, idx) => (
-          <div key={idx} className="mb-4">
-            <h3>{group.group_name}</h3>
-            <p>
-              <strong>Server ID:</strong> {group.server_id} &nbsp; | &nbsp;
-              <strong>Permissions:</strong> {group.permissions} &nbsp; | &nbsp;
-              <strong>Auth Mode:</strong> {group.auth_mode} &nbsp; | &nbsp;
-              <strong>Company:</strong> {group.company}
-            </p>
-            <h5>Symbols</h5>
-            {group.symbols.length === 0 ? (
-              <p>No symbols available.</p>
-            ) : (
-              <Table striped bordered hover size="sm">
-                <thead>
-                  <tr>
-                    <th>Path</th>
-                    <th>Trade Mode</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.symbols.map((symbol, sidx) => (
-                    <tr key={sidx}>
-                      <td>{symbol.path}</td>
-                      <td>{symbol.trade_mode}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            )}
-            <h5>Commissions</h5>
-            {group.commissions.length === 0 ? (
-              <p>No commissions available.</p>
-            ) : (
-              group.commissions.map((comm, cidx) => (
-                <div key={cidx} className="mb-3">
-                  <p>
-                    <strong>Name:</strong> {comm.name}
-                  </p>
-                  {comm.tiers.length === 0 ? (
-                    <p>No tiers available.</p>
-                  ) : (
-                    <Table striped bordered hover size="sm">
-                      <thead>
-                        <tr>
-                          <th>Range From</th>
-                          <th>Range To</th>
-                          <th>Value</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {comm.tiers.map((tier, tidx) => (
-                          <tr key={tidx}>
-                            <td>{tier.range_from}</td>
-                            <td>{tier.range_to}</td>
-                            <td>{tier.value}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </Table>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        ))
+        <Accordion defaultActiveKey="0">
+          {filtered.map((group, gidx) => (
+            <Accordion.Item eventKey={`${gidx}`} key={gidx} className="mb-4 shadow-sm">
+              <Accordion.Header>{group.group_name}</Accordion.Header>
+              <Accordion.Body>
+                <Row className="mb-3">
+                  <Col><strong>Server ID:</strong> {group.server_id}</Col>
+                  <Col><strong>Permissions:</strong> {group.permissions}</Col>
+                  <Col><strong>Auth Mode:</strong> {group.auth_mode}</Col>
+                  <Col><strong>Company:</strong> {group.company}</Col>
+                </Row>
+
+                <h5>Symbols</h5>
+                {group.symbols.length === 0 ? (
+                  <p>No symbols available.</p>
+                ) : (
+                  <Accordion flush>
+                    {group.symbols.map((sym, sidx) => (
+                      <Accordion.Item eventKey={`${gidx}-${sidx}`} key={sidx} className="mb-2">
+                        <Accordion.Header>{sym.path || `Symbol ${sidx + 1}`}</Accordion.Header>
+                        <Accordion.Body>
+                          <Table striped bordered size="sm" responsive>
+                            <thead>
+                              <tr>
+                                <th>Property</th>
+                                <th>Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {Object.entries(sym).map(([key, value]) => (
+                                <tr key={key}>
+                                  <td>{key}</td>
+                                  <td>{String(value)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        </Accordion.Body>
+                      </Accordion.Item>
+                    ))}
+                  </Accordion>
+                )}
+
+                <h5 className="mt-4">Commissions</h5>
+                {group.commissions.length === 0 ? (
+                  <p>No commissions available.</p>
+                ) : (
+                  group.commissions.map((comm, cidx) => (
+                    <Card key={cidx} className="mb-3 border-info">
+                      <Card.Header><strong>Name:</strong> {comm.name}</Card.Header>
+                      <Card.Body>
+                        {comm.tiers.length === 0 ? (
+                          <p>No tiers available.</p>
+                        ) : (
+                          <Table bordered size="sm" responsive className="mb-0">
+                            <thead>
+                              <tr>
+                                <th>Range From</th>
+                                <th>Range To</th>
+                                <th>Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {comm.tiers.map((tier, tidx) => (
+                                <tr key={tidx}>
+                                  <td>{tier.range_from}</td>
+                                  <td>{tier.range_to}</td>
+                                  <td>{tier.value}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        )}
+                      </Card.Body>
+                    </Card>
+                  ))
+                )}
+              </Accordion.Body>
+            </Accordion.Item>
+          ))}
+        </Accordion>
       )}
     </Container>
   );
 };
 
-export default GroupConfigurations;
+export default EnhancedGroupConfigurations;

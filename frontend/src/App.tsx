@@ -8,6 +8,8 @@ import LiveDeals from "./pages/MT5Manager/LiveDeals";
 import DealHistory from "./pages/MT5Manager/DealHistory";
 import GroupConfigurations from "./pages/MT5Manager/GroupConfigurations";
 import TerminalDealHistory from "./pages/MT5Terminal/DealHistory";
+import Dashboards from "./pages/Dashboards/Dashboards.tsx";
+
 import Admin from "./pages/conf/admin";
 import PL from "./pages/conf/P&L";      // <— your wrapped P&L page
 import Mapping from "./pages/conf/MappingPage";
@@ -27,6 +29,8 @@ const App: React.FC = () => (
         <Route path="/admin" element={<Admin />} />
         <Route path="/pl" element={<PL />} />           {/* use lowercase or match exactly */}
         <Route path="/mapping" element={<Mapping />} />
+        <Route path="/Dashboards" element={<Dashboards />} />
+
       </Routes>
     </main>
     <Footer />

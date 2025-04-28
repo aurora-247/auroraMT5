@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.routes import router as api_router
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from app.core.db import Base, engine
+
+
 import logging.config
 import os
 import sys
@@ -60,8 +63,11 @@ LOGGING_CONFIG = {
 }
 
 logging.config.dictConfig(LOGGING_CONFIG)
-#logging.debug("Logging is configured!")
 
+@app.on_event("startup")
+async def on_startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/")
 async def root():

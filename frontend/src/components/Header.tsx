@@ -43,6 +43,9 @@ const Header = () => {
             <Nav.Link as={NavLink} to="/Mapping" className="px-3">
               Mapping
             </Nav.Link>
+            <Nav.Link as={NavLink} to="/Dashboards" className="px-3">
+              Dashboards
+            </Nav.Link>
             <Nav.Link as={NavLink} to="/admin" className="px-3">
               Admin
             </Nav.Link>
