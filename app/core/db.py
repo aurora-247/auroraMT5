@@ -15,3 +15,15 @@ AsyncSessionLocal = sessionmaker(
 
 # 3) base class for your models
 Base = declarative_base()
+
+
+# 4) FastAPI dependency to get an async DB session
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
+
+# 5) Helper to create all tables in an async context
+async def init_db():
+    # run the Base.metadata.create_all() inside an async transaction
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
