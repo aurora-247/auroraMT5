@@ -32,7 +32,7 @@ class MetaTrader5Service:
         # Initialize
         if not mt5.initialize(path=self.path, login=self.login,
                                password=self.password, server=self.server,
-                               portable=True):
+                               portable=False):
             err = mt5.last_error()
             msg = f"MT5 initialize failed: {err}"
             logger.error(msg)
