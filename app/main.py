@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.routes import router as api_router
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from app.core.db import Base, engine
+from app.core.db import engine, init_db
 
 
 import logging.config
@@ -67,7 +67,8 @@ logging.config.dictConfig(LOGGING_CONFIG)
 @app.on_event("startup")
 async def on_startup():
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await init_db()
+
 
 @app.get("/")
 async def root():

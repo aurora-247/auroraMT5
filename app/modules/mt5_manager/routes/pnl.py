@@ -1,22 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from datetime import datetime
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 
-from app.database import get_db  # your existing DB session dependency
+from app.core.db import get_db
 from app.models import (
-    ManagerDeal,       # SQLAlchemy model for hedged client deals
-    TerminalFill,      # SQLAlchemy model for LP netting fills
-    GroupConfig,       # SQLAlchemy model for group configurations (commissions, swaps)
-    SymbolConfig,      # SQLAlchemy model for symbol specifications
-    UserGroupMapping,  # SQLAlchemy model mapping login to group
-    FXRate             # SQLAlchemy model for historical FX rates
+    ManagerDeal,
+    TerminalFill,
+    GroupConfig,
+    SymbolConfig,
+    UserGroupMapping,
+    FXRate
 )
 
 router = APIRouter(prefix="/pnl", tags=["P&L"])
 
 # Pydantic schemas for response
+template = dict(
+    total_markup=(float, ...),
+    total_commission=(float, ...),
+    total_swap_client=(float, ...),
+    total_lp_cost=(float, ...),
+    broker_pnl=(float, ...),
+)
 class PnLSummary(BaseModel):
     total_markup: float
     total_commission: float
@@ -30,107 +38,78 @@ class PnLDetail(BaseModel):
     symbol: Optional[str]
     summary: PnLSummary
 
-
-def get_fx_rate(db: Session, currency: str, dt: datetime) -> float:
+async def get_fx_rate(db: AsyncSession, currency: str, dt: datetime) -> float:
     """
     Fetch the FX rate to USD at given datetime. Defaults to 1.0 if USD.
     """
     if currency.upper() == 'USD':
         return 1.0
-    rate = db.query(FXRate) \
-             .filter(FXRate.base == currency, FXRate.date <= dt) \
-             .order_by(FXRate.date.desc()) \
-             .first()
-    if not rate:
+    qry = select(FXRate).where(FXRate.base == currency, FXRate.date <= dt).order_by(FXRate.date.desc())
+    result = await db.execute(qry)
+    rate_obj = result.scalars().first()
+    if not rate_obj:
         raise HTTPException(status_code=400, detail=f"FX rate for {currency} not found at {dt}")
-    return rate.rate
-
+    return rate_obj.rate
 
 @router.get("/", response_model=PnLDetail)
 async def get_pnl(
     date_from: datetime,
     date_to: datetime,
     symbol: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     # 1. Fetch client deals
-    deals_query = db.query(ManagerDeal) \
-                    .filter(ManagerDeal.open_time >= date_from,
-                            ManagerDeal.close_time <= date_to)
+    deal_q = select(ManagerDeal).where(
+        ManagerDeal.open_time >= date_from,
+        ManagerDeal.close_time <= date_to
+    )
     if symbol:
-        deals_query = deals_query.filter(ManagerDeal.symbol == symbol)
-    deals: List[ManagerDeal] = deals_query.all()
+        deal_q = deal_q.where(ManagerDeal.symbol == symbol)
+    deals_res = await db.execute(deal_q)
+    deals: List[ManagerDeal] = deals_res.scalars().all()
 
     # 2. Fetch LP fills
-    fills_query = db.query(TerminalFill) \
-                    .filter(TerminalFill.time >= date_from,
-                            TerminalFill.time <= date_to)
+    fill_q = select(TerminalFill).where(
+        TerminalFill.time >= date_from,
+        TerminalFill.time <= date_to
+    )
     if symbol:
-        fills_query = fills_query.filter(TerminalFill.symbol == symbol)
-    fills: List[TerminalFill] = fills_query.all()
+        fill_q = fill_q.where(TerminalFill.symbol == symbol)
+    fills_res = await db.execute(fill_q)
+    fills: List[TerminalFill] = fills_res.scalars().all()
 
-    # 3. Load group configs, symbol configs
+    # 3. Load configs
     group_cache: Dict[int, GroupConfig] = {}
     symbol_cache: Dict[str, SymbolConfig] = {}
 
-    total_markup = total_comm = total_swap_client = 0.0
+    total_markup = total_commission = total_swap_client = 0.0
 
     # Calculate client-side P&L and fees
     for deal in deals:
-        # Load symbol config
-        if deal.symbol not in symbol_cache:
-            symbol_cache[deal.symbol] = db.query(SymbolConfig) \
-                                         .filter(SymbolConfig.symbol == deal.symbol) \
-                                         .first()
-        sym_conf = symbol_cache[deal.symbol]
-
-        # Load group config
-        if deal.group_id not in group_cache:
-            group_cache[deal.group_id] = db.query(GroupConfig) \
-                                          .filter(GroupConfig.group_id == deal.group_id) \
-                                          .first()
-        grp_conf = group_cache[deal.group_id]
+        sym_conf = symbol_cache.get(deal.symbol) or (symbol_cache.setdefault(deal.symbol, (await db.get(SymbolConfig, deal.symbol))))
+        grp_conf = group_cache.get(deal.group_id) or (group_cache.setdefault(deal.group_id, (await db.get(GroupConfig, deal.group_id))))
 
         # Raw P&L in symbol currency
-        raw_pnl = (deal.close_price - deal.open_price) \
-                  * deal.volume \
-                  * deal.contract_size
+        raw_pnl = (deal.close_price - deal.open_price) * deal.volume * deal.contract_size
 
         # Spread markup revenue
-        # Option: use price_gateway diff
-        spread_markup = (deal.open_price - deal.gateway_price) \
-                        * deal.volume \
-                        * deal.contract_size
+        spread_markup = (deal.open_price - deal.gateway_price) * deal.volume * deal.contract_size
         total_markup += spread_markup
 
         # Commission fee from group tiers
-        # Find applicable tier
-        comm_rate = 0.0
-        for comm in grp_conf.commissions:
-            if comm.range_from <= deal.volume <= comm.range_to:
-                comm_rate = comm.value
-                break
+        comm_rate = next((tier.value for tier in grp_conf.commissions if tier.range_from <= deal.volume <= tier.range_to), 0.0)
         commission_fee = comm_rate * deal.volume
-        total_comm += commission_fee
+        total_commission += commission_fee
 
         # Swap (financing)
         swap_rate = grp_conf.swap_long if deal.action == 'Buy' else grp_conf.swap_short
         swap_fee = swap_rate * deal.volume
         total_swap_client += swap_fee
 
-        # Convert all client fees/pnl to USD
-        fx_open = get_fx_rate(db, deal.currency, deal.open_time)
-        fx_close = get_fx_rate(db, deal.currency, deal.close_time)
-        total_markup += 0  # already USD if sym quote USD
-        total_comm   += 0  # commission in USD
-        total_swap_client += 0  # swap in USD
-
     # 4. Calculate LP-side cost
-    total_lp_cost = 0.0
-    for f in fills:
-        total_lp_cost += f.profit + f.swap + f.commission
+    total_lp_cost = sum((f.profit + f.swap + f.commission) for f in fills)
 
-    broker_pnl = total_markup + total_comm - total_lp_cost
+    broker_pnl = total_markup + total_commission - total_lp_cost
 
     return PnLDetail(
         date_from=date_from,
@@ -138,7 +117,7 @@ async def get_pnl(
         symbol=symbol,
         summary=PnLSummary(
             total_markup=total_markup,
-            total_commission=total_comm,
+            total_commission=total_commission,
             total_swap_client=total_swap_client,
             total_lp_cost=total_lp_cost,
             broker_pnl=broker_pnl
