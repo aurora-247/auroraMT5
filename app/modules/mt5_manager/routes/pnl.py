@@ -5,13 +5,12 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 
-from app.core.db import get_db
+from app.db.db import get_db
 from app.models import (
     ManagerDeal,
     TerminalFill,
     GroupConfig,
     SymbolConfig,
-    UserGroupMapping,
     FXRate
 )
 

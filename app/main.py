@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.routes import router as api_router
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from app.core.db import engine, init_db
+from app.db.db import engine, init_db
 
 
 import logging.config

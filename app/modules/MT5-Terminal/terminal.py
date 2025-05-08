@@ -29,21 +29,43 @@ class MetaTrader5Service:
             return "Already connected"
         if self._error:
             return self._error
-        # Initialize
-        if not mt5.initialize(path=self.path, login=self.login,
-                               password=self.password, server=self.server,
-                               portable=True):
-            err = mt5.last_error()
-            msg = f"MT5 initialize failed: {err}"
-            logger.error(msg)
-            return msg
-        # Login
-        if not mt5.login(self.login, password=self.password, server=self.server):
-            err = mt5.last_error()
+
+        # 1) Normalize and resolve
+        p = Path(self.raw_path).expanduser()
+        logger.debug(f"MT5 raw path   = {self.raw_path!r}")
+        try:
+            p = p.resolve(strict=True)
+        except FileNotFoundError:
+            return f"MT5 initialize failed: path does not exist: {self.raw_path!r}"
+
+        # 2) Validate it’s a file (and .exe on Windows)
+        if not p.is_file():
+            return f"MT5 initialize failed: not a file: {p}"
+        if os.name == "nt" and p.suffix.lower() != ".exe":
+            return f"MT5 initialize failed: expected a .exe, got: {p.suffix}"
+
+        # 3) Convert to forward-slashes for MT5’s IPC
+        mt5_path = str(p).replace("\\", "/")
+        logger.debug(f"MT5 resolved path = {mt5_path!r}")
+
+        # 4) Shut down any stale session
+        mt5.shutdown()
+
+        # 5) Initialize (split init & login is more reliable)
+        if not mt5.initialize(path=mt5_path, portable=True):
+            code, msg = mt5.last_error()
+            err = f"MT5 initialize failed: ({code}, {msg})"
+            logger.error(err)
+            return err
+
+        # 6) Login
+        if not mt5.login(login=self.login, password=self.password, server=self.server):
+            code, msg = mt5.last_error()
             mt5.shutdown()
-            msg = f"MT5 login failed: {err}"
-            logger.error(msg)
-            return msg
+            err = f"MT5 login failed: ({code}, {msg})"
+            logger.error(err)
+            return err
+
         self._connected = True
         logger.info("MT5 connected and logged in")
         return "Connected"

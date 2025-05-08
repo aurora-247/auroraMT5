@@ -1,7 +1,7 @@
 # app/models/symbol_mapping.py
 
 from sqlalchemy import Column, Integer, String
-from app.core.db import Base
+from app.db.db import Base
 
 class SymbolMapping(Base):
     __tablename__ = "symbol_mappings"
